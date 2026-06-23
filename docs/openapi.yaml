@@ -1,31 +1,1246 @@
 openapi: 3.0.3
+
 info:
-  title: Concurrent Order Processing API
-  description: Hexagonal, event-driven order processing system with concurrent inventory, payments and notifications.
-  version: 0.1.0
+  title: Order Processing API
+  description: >-
+    Hexagonal, event-driven Go order-processing system. Provides JWT
+    authentication with role-based access control (customer / admin), a product
+    catalogue with inventory, and an idempotent order pipeline
+    (reserve -> pay -> fulfill) driven by an in-process async event bus.
+
+
+    Money is always represented in integer minor units (e.g. cents). The fields
+    `price_amount`, `unit_price`, `subtotal`, `total_amount`, `total` and
+    `total_revenue` are integers and are paired with a 3-letter ISO-4217
+    `currency` code.
+
+
+    Errors are returned with a consistent envelope:
+    `{ "error": { "code": "...", "message": "..." } }`.
+  version: 1.0.0
+  contact:
+    name: backend-golang-task-2026
+    url: https://github.com/ibrahim-999/backend-golang-task-2026
+
 servers:
   - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: System
+    description: Liveness, readiness and metrics probes.
+  - name: Auth
+    description: Registration and login (public).
+  - name: Users
+    description: User account management.
+  - name: Products
+    description: Product catalogue and inventory.
+  - name: Orders
+    description: Customer order placement and lifecycle.
+  - name: Admin
+    description: Administrative operations (admin role required).
+
+security:
+  - bearerAuth: []
+
 paths:
+  /:
+    get:
+      tags: [System]
+      summary: Service index
+      description: Returns service metadata and the location of key endpoints.
+      operationId: getServiceIndex
+      security: []
+      responses:
+        '200':
+          description: Service metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: order-processing
+                  version:
+                    type: string
+                    example: 1.0.0
+                  health:
+                    type: string
+                    example: /health
+                  ready:
+                    type: string
+                    example: /ready
+                  metrics:
+                    type: string
+                    example: /metrics
+                  api:
+                    type: string
+                    example: /api/v1
+
   /health:
     get:
+      tags: [System]
       summary: Liveness probe
-      tags: [system]
+      description: Returns 200 while the process is alive. Does not check dependencies.
+      operationId: getHealth
+      security: []
       responses:
-        "200":
-          description: Service is alive
+        '200':
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 1.0.0
+
   /ready:
     get:
+      tags: [System]
       summary: Readiness probe
-      tags: [system]
+      description: >-
+        Returns 200 only when the service can reach the database. Returns 503
+        when the database is not configured or unreachable.
+      operationId: getReady
+      security: []
       responses:
-        "200":
-          description: Service is ready
-        "503":
-          description: A dependency is unavailable
+        '200':
+          description: Service is ready to accept traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: A required dependency (the database) is unavailable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: unavailable
+                  reason:
+                    type: string
+                    example: database unreachable
+
   /metrics:
     get:
+      tags: [System]
       summary: Prometheus metrics
-      tags: [system]
+      description: Prometheus text-format metrics exposition.
+      operationId: getMetrics
+      security: []
       responses:
-        "200":
-          description: Metrics in Prometheus exposition format
+        '200':
+          description: Metrics in Prometheus text exposition format.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/ping:
+    get:
+      tags: [System]
+      summary: API ping
+      description: Simple liveness check for the versioned API group.
+      operationId: getPing
+      security: []
+      responses:
+        '200':
+          description: Pong.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pong:
+                    type: boolean
+                    example: true
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: >-
+        Public endpoint. Creates a new account. `role` is optional and defaults
+        to `customer` when omitted.
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: >-
+        Public endpoint. Authenticates with email and password and returns a
+        signed JWT plus the user profile.
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users:
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: >-
+        Public endpoint. Creates a user account. Equivalent to register but
+        `role` is passed through as-is (defaults to `customer` when omitted).
+      operationId: createUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user by id
+      description: Requires authentication.
+      operationId: getUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Users]
+      summary: Update a user
+      description: Requires authentication. Updates the user's full name.
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: List products
+      description: Public endpoint. Returns a paginated list of products.
+      operationId: listProducts
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: Paginated products.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Product'
+    post:
+      tags: [Products]
+      summary: Create a product
+      description: Admin only. Creates a product and its initial inventory.
+      operationId: createProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/products/{id}:
+    get:
+      tags: [Products]
+      summary: Get a product by id
+      description: Public endpoint.
+      operationId: getProduct
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Products]
+      summary: Update a product
+      description: >-
+        Admin only. All fields are optional; only the provided fields are
+        updated.
+      operationId: updateProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        '200':
+          description: Updated product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/products/{id}/inventory:
+    get:
+      tags: [Products]
+      summary: Get product inventory
+      description: Requires authentication. Returns available/reserved stock levels.
+      operationId: getProductInventory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Inventory for the product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inventory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      summary: Place an order
+      description: >-
+        Requires authentication. The order is attributed to the authenticated
+        user. Supply an optional `Idempotency-Key` header to make placement
+        idempotent; if omitted, a key is generated server-side. Triggers the
+        async reserve -> pay -> fulfill pipeline; the returned order is in its
+        initial state and progresses asynchronously.
+      operationId: placeOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceOrderRequest'
+      responses:
+        '201':
+          description: Order accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Orders]
+      summary: List my orders
+      description: >-
+        Requires authentication. Returns a paginated list of the authenticated
+        user's orders.
+      operationId: listMyOrders
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: Paginated orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Get an order by id
+      description: >-
+        Requires authentication. The caller must own the order, or be an admin.
+      operationId: getOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/status:
+    get:
+      tags: [Orders]
+      summary: Get order status
+      description: >-
+        Requires authentication. Returns just the id and current status. The
+        caller must own the order, or be an admin.
+      operationId: getOrderStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The order status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/cancel:
+    put:
+      tags: [Orders]
+      summary: Cancel an order
+      description: >-
+        Requires authentication. The caller must own the order, or be an admin.
+        Only orders in a cancellable state can be cancelled.
+      operationId: cancelOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The cancelled order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/admin/orders:
+    get:
+      tags: [Admin]
+      summary: List all orders
+      description: Admin only. Returns a paginated list of every order in the system.
+      operationId: adminListOrders
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: Paginated orders (admin view).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminOrder'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/admin/orders/{id}/status:
+    put:
+      tags: [Admin]
+      summary: Update order status
+      description: >-
+        Admin only. Forces an order into the given status (subject to domain
+        transition rules).
+      operationId: adminUpdateOrderStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrderStatusRequest'
+      responses:
+        '200':
+          description: Status updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/admin/reports/daily:
+    get:
+      tags: [Admin]
+      summary: Daily sales report
+      description: >-
+        Admin only. Aggregates orders for a given day. The optional `date`
+        query parameter is an ISO date (YYYY-MM-DD); when omitted the server
+        default day is used.
+      operationId: adminDailyReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Report date in YYYY-MM-DD format.
+          schema:
+            type: string
+            format: date
+            example: '2026-06-23'
+      responses:
+        '200':
+          description: Daily report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/admin/inventory/low-stock:
+    get:
+      tags: [Admin]
+      summary: Low-stock inventory
+      description: >-
+        Admin only. Returns inventory rows whose available stock is at or below
+        their reorder level.
+      operationId: adminLowStock
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Low-stock items.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LowStockItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        JWT obtained from `POST /api/v1/auth/login`. Send it as
+        `Authorization: Bearer <token>`.
+
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      description: Positive integer resource identifier.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+        example: 1
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number. Defaults to 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+        example: 1
+    SizeParam:
+      name: size
+      in: query
+      required: false
+      description: Page size. Defaults to 20, capped at 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+        example: 20
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Optional client-supplied idempotency key. Repeating a request with the
+        same key returns the original order instead of creating a duplicate. If
+        omitted, the server generates one.
+      schema:
+        type: string
+        example: 7f1c8b2e-3a4d-4c9f-9b2a-2e1d4c8b7f1c
+
+  responses:
+    BadRequest:
+      description: Validation error or malformed request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: request.invalid
+              message: invalid request body
+    Unauthorized:
+      description: Missing or invalid authentication.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: unauthorized
+              message: authentication required
+    Forbidden:
+      description: Authenticated but not permitted (e.g. non-admin or not the owner).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: order.forbidden
+              message: you do not have access to this order
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: not_found
+              message: Not Found
+    Conflict:
+      description: Conflict (e.g. duplicate email, invalid state transition, out of stock).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: conflict
+              message: Conflict
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code.
+              example: request.invalid
+            message:
+              type: string
+              description: Human-readable error message.
+              example: invalid resource id
+
+    Page:
+      type: object
+      description: Pagination envelope. `items` is overridden per endpoint.
+      required: [items, total, number, size]
+      properties:
+        items:
+          type: array
+          items: {}
+        total:
+          type: integer
+          format: int64
+          description: Total number of matching records across all pages.
+          example: 42
+        number:
+          type: integer
+          description: 1-based page number returned.
+          example: 1
+        size:
+          type: integer
+          description: Page size used.
+          example: 20
+
+    Role:
+      type: string
+      enum: [customer, admin]
+      description: User role used for RBAC.
+
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: s3cret-password
+        full_name:
+          type: string
+          example: Jane Doe
+        role:
+          $ref: '#/components/schemas/Role'
+
+    CreateUserRequest:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: s3cret-password
+        full_name:
+          type: string
+          example: Jane Doe
+        role:
+          $ref: '#/components/schemas/Role'
+
+    UpdateUserRequest:
+      type: object
+      required: [full_name]
+      properties:
+        full_name:
+          type: string
+          example: Jane A. Doe
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        password:
+          type: string
+          format: password
+          example: s3cret-password
+
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: Signed JWT bearer token.
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      required: [id, email, full_name, role]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        full_name:
+          type: string
+          example: Jane Doe
+        role:
+          $ref: '#/components/schemas/Role'
+
+    CreateProductRequest:
+      type: object
+      required: [sku, name, currency]
+      properties:
+        sku:
+          type: string
+          example: WIDGET-001
+        name:
+          type: string
+          example: Blue Widget
+        description:
+          type: string
+          example: A sturdy blue widget.
+        price_amount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Unit price in integer minor units.
+          example: 1999
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: 3-letter ISO-4217 currency code.
+          example: USD
+        initial_stock:
+          type: integer
+          minimum: 0
+          example: 100
+        reorder_level:
+          type: integer
+          minimum: 0
+          example: 10
+
+    UpdateProductRequest:
+      type: object
+      description: All fields optional; only provided fields are updated.
+      properties:
+        name:
+          type: string
+          nullable: true
+          example: Blue Widget v2
+        description:
+          type: string
+          nullable: true
+          example: An even sturdier blue widget.
+        price_amount:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          example: 2499
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          nullable: true
+          example: USD
+        active:
+          type: boolean
+          nullable: true
+          example: true
+
+    Product:
+      type: object
+      required: [id, sku, name, description, price_amount, currency, active]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        sku:
+          type: string
+          example: WIDGET-001
+        name:
+          type: string
+          example: Blue Widget
+        description:
+          type: string
+          example: A sturdy blue widget.
+        price_amount:
+          type: integer
+          format: int64
+          description: Unit price in integer minor units.
+          example: 1999
+        currency:
+          type: string
+          example: USD
+        active:
+          type: boolean
+          example: true
+
+    Inventory:
+      type: object
+      required: [product_id, available, reserved, reorder_level]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+          example: 1
+        available:
+          type: integer
+          description: Units available for new reservations.
+          example: 88
+        reserved:
+          type: integer
+          description: Units currently reserved by in-flight orders.
+          example: 12
+        reorder_level:
+          type: integer
+          description: Threshold at or below which the item is considered low stock.
+          example: 10
+
+    PlaceOrderRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PlaceOrderItem'
+
+    PlaceOrderItem:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+          example: 1
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+
+    OrderStatusValue:
+      type: string
+      enum: [pending, reserved, paid, fulfilled, cancelled, failed]
+      description: Lifecycle status of an order.
+
+    OrderItem:
+      type: object
+      required: [product_id, sku, name, unit_price, quantity, subtotal]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+          example: 1
+        sku:
+          type: string
+          example: WIDGET-001
+        name:
+          type: string
+          example: Blue Widget
+        unit_price:
+          type: integer
+          format: int64
+          description: Unit price in integer minor units.
+          example: 1999
+        quantity:
+          type: integer
+          example: 2
+        subtotal:
+          type: integer
+          format: int64
+          description: unit_price * quantity, in integer minor units.
+          example: 3998
+
+    Order:
+      type: object
+      description: Customer-facing order representation.
+      required: [id, status, total_amount, currency, items, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        status:
+          $ref: '#/components/schemas/OrderStatusValue'
+        total_amount:
+          type: integer
+          format: int64
+          description: Order total in integer minor units.
+          example: 3998
+        currency:
+          type: string
+          example: USD
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-06-23T10:15:30Z'
+
+    AdminOrder:
+      type: object
+      description: Admin order representation (includes user_id and failure_reason).
+      required: [id, user_id, status, items, total, currency, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        user_id:
+          type: integer
+          format: int64
+          example: 7
+        status:
+          $ref: '#/components/schemas/OrderStatusValue'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        total:
+          type: integer
+          format: int64
+          description: Order total in integer minor units.
+          example: 3998
+        currency:
+          type: string
+          example: USD
+        failure_reason:
+          type: string
+          description: Reason the order failed; omitted when empty.
+          example: payment declined
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-06-23T10:15:30Z'
+
+    OrderStatus:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        status:
+          $ref: '#/components/schemas/OrderStatusValue'
+
+    UpdateOrderStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatusValue'
+
+    DailyReport:
+      type: object
+      required: [date, total_orders, total_revenue, currency, by_status]
+      properties:
+        date:
+          type: string
+          format: date
+          example: '2026-06-23'
+        total_orders:
+          type: integer
+          example: 12
+        total_revenue:
+          type: integer
+          format: int64
+          description: Total revenue for the day in integer minor units.
+          example: 47988
+        currency:
+          type: string
+          example: USD
+        by_status:
+          type: object
+          description: Count of orders keyed by status.
+          additionalProperties:
+            type: integer
+          example:
+            fulfilled: 9
+            cancelled: 2
+            failed: 1
+
+    LowStockItem:
+      type: object
+      required: [product_id, available, reserved, reorder_level]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+          example: 1
+        available:
+          type: integer
+          example: 5
+        reserved:
+          type: integer
+          example: 2
+        reorder_level:
+          type: integer
+          example: 10
