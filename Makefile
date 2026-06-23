@@ -11,10 +11,11 @@ GOCACHE_VOL  := opt-gobuildcache
 
 GO_RUN = docker run --rm -v $(PWD_DIR):/src -w /src -v $(GOMOD_VOL):/go/pkg/mod -v $(GOCACHE_VOL):/root/.cache/go-build -e CGO_ENABLED=0 $(GO_IMAGE)
 GO_RUN_DB = docker run --rm --network $(NETWORK) --env-file .env -e DB_HOST=postgres -e DB_PORT=5432 -e DB_SSLMODE=disable -v $(PWD_DIR):/src -w /src -v $(GOMOD_VOL):/go/pkg/mod -v $(GOCACHE_VOL):/root/.cache/go-build -e CGO_ENABLED=1 $(GO_IMAGE)
+GO_RUN_TESTDB = docker run --rm --network $(NETWORK) --env-file .env -e DB_HOST=postgres -e DB_PORT=5432 -e DB_SSLMODE=disable -e DB_NAME=orders_test -v $(PWD_DIR):/src -w /src -v $(GOMOD_VOL):/go/pkg/mod -v $(GOCACHE_VOL):/root/.cache/go-build -e CGO_ENABLED=1 $(GO_IMAGE)
 
 .PHONY: help
 help:
-	@echo "Concurrent Order Processing System — Make targets"
+	@echo "Concurrent Order Processing System - Make targets"
 	@echo ""
 	@echo "  Setup"
 	@echo "    make env             Copy .env.example to .env"
@@ -125,7 +126,9 @@ test-race:
 .PHONY: test-integration
 test-integration: env
 	$(COMPOSE) up -d postgres
-	$(GO_RUN_DB) go test -race -count=1 -tags=integration ./test/...
+	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
+	$(GO_RUN_TESTDB) go test -race -count=1 -tags=integration ./test/...
 
 .PHONY: cover
 cover:
@@ -134,12 +137,15 @@ cover:
 .PHONY: bench
 bench: env
 	$(COMPOSE) up -d postgres
-	$(GO_RUN_DB) go test -tags=integration -bench=. -benchmem -run=^$$ ./test/...
+	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
+	$(GO_RUN_TESTDB) go test -tags=integration -bench=. -benchmem -run=^$$ ./test/...
 
 .PHONY: migrate
 migrate:
 	$(COMPOSE) exec app /app/server migrate || $(COMPOSE) run --rm app migrate
 
 .PHONY: seed
-seed:
-	$(COMPOSE) run --rm app /app/seed
+seed: env
+	$(COMPOSE) up -d postgres
+	$(GO_RUN_DB) go run -buildvcs=false ./cmd/seed
