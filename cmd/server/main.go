@@ -39,6 +39,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := gormrepo.AutoMigrate(db); err != nil {
+		log.Error().Err(err).Msg("database schema migration failed")
+		return err
+	}
+	log.Info().Msg("database schema migrated")
 	defer func() {
 		if sqlDB, derr := db.DB(); derr == nil {
 			_ = sqlDB.Close()
