@@ -37,7 +37,7 @@ func TestReserveDoesNotOversell(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, gormrepo.AutoMigrate(db))
-	require.NoError(t, db.Exec("DELETE FROM inventories").Error)
+	require.NoError(t, db.Exec("DELETE FROM inventories WHERE product_id = ?", 1).Error)
 	require.NoError(t, db.Create(&gormrepo.InventoryModel{
 		ProductID:    1,
 		Available:    1,
