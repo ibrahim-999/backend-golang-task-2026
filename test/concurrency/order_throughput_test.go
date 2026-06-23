@@ -61,13 +61,14 @@ func newHarness(t testing.TB, initialStock int) *harness {
 	h := &harness{server: server, app: app}
 
 	suffix := uuid.NewString()
-	h.register(t, "admin-"+suffix+"@example.com", "password123", "Admin", "admin")
-	h.adminToken = h.login(t, "admin-"+suffix+"@example.com", "password123")
+	pw := "pw-" + suffix
+	h.register(t, "admin-"+suffix+"@example.com", pw, "Admin", "admin")
+	h.adminToken = h.login(t, "admin-"+suffix+"@example.com", pw)
 
 	h.productID = h.createProduct(t, "SKU-"+suffix, initialStock)
 
-	h.register(t, "customer-"+suffix+"@example.com", "password123", "Customer", "customer")
-	h.customerToken = h.login(t, "customer-"+suffix+"@example.com", "password123")
+	h.register(t, "customer-"+suffix+"@example.com", pw, "Customer", "customer")
+	h.customerToken = h.login(t, "customer-"+suffix+"@example.com", pw)
 
 	require.Equal(t, initialStock, h.inventory(t), "seeded inventory not visible before load")
 

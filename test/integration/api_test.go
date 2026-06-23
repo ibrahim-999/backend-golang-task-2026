@@ -74,19 +74,20 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 	client := &apiClient{t: t, base: ts.URL, client: ts.Client()}
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	pw := "pw-" + suffix
 	adminEmail := "admin-" + suffix + "@example.com"
 	customerEmail := "customer-" + suffix + "@example.com"
 	sku := "SKU-" + suffix
 
 	adminReg := client.do(t, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"email":     adminEmail,
-		"password":  "supersecret1",
+		"password":  pw,
 		"full_name": "Admin User",
 		"role":      "admin",
 	})
 	require.Equal(t, http.StatusCreated, adminReg.status)
 
-	adminToken := client.login(t, adminEmail, "supersecret1")
+	adminToken := client.login(t, adminEmail, pw)
 
 	var product productResponse
 	createProduct := client.do(t, http.MethodPost, "/api/v1/products", adminToken, map[string]any{
@@ -104,7 +105,7 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 
 	customerReg := client.do(t, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"email":     customerEmail,
-		"password":  "supersecret1",
+		"password":  pw,
 		"full_name": "Customer User",
 		"role":      "customer",
 	})
@@ -115,7 +116,7 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 	customerReg.decode(t, &customerUser)
 	require.NotZero(t, customerUser.ID)
 
-	customerToken := client.login(t, customerEmail, "supersecret1")
+	customerToken := client.login(t, customerEmail, pw)
 
 	var placed orderResponse
 	place := client.do(t, http.MethodPost, "/api/v1/orders", customerToken, map[string]any{
