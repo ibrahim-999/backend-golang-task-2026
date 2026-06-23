@@ -29,6 +29,8 @@ type Dependencies struct {
 	Product *handler.Product
 	Order   *handler.Order
 	Admin   *handler.Admin
+	Docs    *handler.Docs
+	WS      gin.HandlerFunc
 }
 
 func New(deps Dependencies) *gin.Engine {
@@ -57,9 +59,19 @@ func New(deps Dependencies) *gin.Engine {
 			"health":  "/health",
 			"ready":   "/ready",
 			"metrics": "/metrics",
+			"docs":    "/docs",
 			"api":     "/api/v1",
 		})
 	})
+
+	if deps.Docs != nil {
+		engine.GET("/openapi.yaml", deps.Docs.Spec)
+		engine.GET("/docs", deps.Docs.UI)
+	}
+
+	if deps.WS != nil {
+		engine.GET("/ws", deps.WS)
+	}
 
 	v1 := engine.Group("/api/v1")
 	if deps.RateLimit.Enabled {
