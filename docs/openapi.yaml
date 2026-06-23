@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: Concurrent Order Processing API
+  description: Hexagonal, event-driven order processing system with concurrent inventory, payments and notifications.
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      tags: [system]
+      responses:
+        "200":
+          description: Service is alive
+  /ready:
+    get:
+      summary: Readiness probe
+      tags: [system]
+      responses:
+        "200":
+          description: Service is ready
+        "503":
+          description: A dependency is unavailable
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      tags: [system]
+      responses:
+        "200":
+          description: Metrics in Prometheus exposition format

@@ -21,7 +21,11 @@ func newUserRepo(db *gorm.DB) *userRepo {
 
 func (r *userRepo) Create(ctx context.Context, u *user.User) error {
 	m := userToModel(u)
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	u.AssignID(m.ID)
+	return nil
 }
 
 func (r *userRepo) Update(ctx context.Context, u *user.User) error {

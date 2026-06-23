@@ -109,6 +109,12 @@ func ReconstituteOrder(id, userID uint64, status Status, items []Item, total sha
 	}
 }
 
+func (o *Order) AssignID(id uint64) {
+	if o.id == 0 {
+		o.id = id
+	}
+}
+
 func (o *Order) ID() uint64             { return o.id }
 func (o *Order) UserID() uint64         { return o.userID }
 func (o *Order) Status() Status         { return o.status }

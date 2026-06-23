@@ -21,7 +21,11 @@ func newNotificationRepo(db *gorm.DB) *notificationRepo {
 
 func (r *notificationRepo) Create(ctx context.Context, n *notification.Notification) error {
 	m := notificationToModel(n)
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	n.AssignID(m.ID)
+	return nil
 }
 
 func (r *notificationRepo) Update(ctx context.Context, n *notification.Notification) error {

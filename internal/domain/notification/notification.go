@@ -111,6 +111,12 @@ func (n *Notification) MarkFailed(reason string) error {
 	return nil
 }
 
+func (n *Notification) AssignID(id uint64) {
+	if n.id == 0 {
+		n.id = id
+	}
+}
+
 func (n *Notification) ID() uint64 {
 	return n.id
 }

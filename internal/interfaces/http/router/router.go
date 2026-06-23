@@ -7,9 +7,11 @@ import (
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/ports"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/observability"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/interfaces/http/handler"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/interfaces/http/middleware"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/platform/config"
 )
 
 type Dependencies struct {
@@ -18,6 +20,15 @@ type Dependencies struct {
 	Logger      zerolog.Logger
 	Metrics     *observability.Metrics
 	DB          *gorm.DB
+
+	TokenVerifier ports.TokenVerifier
+	RateLimit     config.RateLimit
+
+	Auth    *handler.Auth
+	User    *handler.User
+	Product *handler.Product
+	Order   *handler.Order
+	Admin   *handler.Admin
 }
 
 func New(deps Dependencies) *gin.Engine {
@@ -51,7 +62,38 @@ func New(deps Dependencies) *gin.Engine {
 	})
 
 	v1 := engine.Group("/api/v1")
+	if deps.RateLimit.Enabled {
+		v1.Use(middleware.RateLimit(deps.RateLimit.RPS, deps.RateLimit.Burst, deps.RateLimit.TTL))
+	}
 	v1.GET("/ping", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"pong": true}) })
+
+	v1.POST("/auth/register", deps.Auth.Register)
+	v1.POST("/auth/login", deps.Auth.Login)
+	v1.POST("/users", deps.User.Create)
+	v1.GET("/products", deps.Product.List)
+	v1.GET("/products/:id", deps.Product.Get)
+
+	authed := v1.Group("")
+	authed.Use(middleware.Auth(deps.TokenVerifier))
+
+	authed.GET("/users/:id", deps.User.Get)
+	authed.PUT("/users/:id", deps.User.Update)
+
+	authed.GET("/products/:id/inventory", deps.Product.Inventory)
+
+	authed.POST("/orders", deps.Order.Place)
+	authed.GET("/orders", deps.Order.List)
+	authed.GET("/orders/:id", deps.Order.Get)
+	authed.PUT("/orders/:id/cancel", deps.Order.Cancel)
+	authed.GET("/orders/:id/status", deps.Order.Status)
+
+	admin := v1.Group("")
+	admin.Use(middleware.Auth(deps.TokenVerifier), middleware.RequireAdmin())
+
+	admin.POST("/products", deps.Product.Create)
+	admin.PUT("/products/:id", deps.Product.Update)
+
+	deps.Admin.Register(admin)
 
 	return engine
 }

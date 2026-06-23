@@ -71,6 +71,12 @@ func (p *Product) Deactivate() {
 	p.active = false
 }
 
+func (p *Product) AssignID(id uint64) {
+	if p.id == 0 {
+		p.id = id
+	}
+}
+
 func (p *Product) ID() uint64           { return p.id }
 func (p *Product) SKU() string          { return p.sku }
 func (p *Product) Name() string         { return p.name }

@@ -22,7 +22,11 @@ func newPaymentRepo(db *gorm.DB) *paymentRepo {
 
 func (r *paymentRepo) Create(ctx context.Context, p *payment.Payment) error {
 	m := paymentToModel(p)
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	p.AssignID(m.ID)
+	return nil
 }
 
 func (r *paymentRepo) Update(ctx context.Context, p *payment.Payment) error {

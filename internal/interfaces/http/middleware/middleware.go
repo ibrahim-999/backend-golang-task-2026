@@ -3,18 +3,27 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/ports"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/observability"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/interfaces/http/httpx"
+	"github.com/ibrahim-999/backend-golang-task-2026/pkg/errs"
 )
 
 const (
 	RequestIDHeader = "X-Request-ID"
 	requestIDKey    = "request_id"
+	userIDKey       = "user_id"
+	userRoleKey     = "user_role"
+	roleAdmin       = "admin"
 )
 
 func RequestID() gin.HandlerFunc {
@@ -108,5 +117,98 @@ func Metrics(m *observability.Metrics) gin.HandlerFunc {
 		status := strconv.Itoa(c.Writer.Status())
 		m.HTTPRequests.WithLabelValues(c.Request.Method, path, status).Inc()
 		m.HTTPDuration.WithLabelValues(c.Request.Method, path).Observe(time.Since(start).Seconds())
+	}
+}
+
+func Auth(verifier ports.TokenVerifier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		const prefix = "Bearer "
+		if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+			httpx.Error(c, errs.Unauthorized("unauthorized", "missing or malformed authorization header"))
+			return
+		}
+
+		token := strings.TrimSpace(header[len(prefix):])
+		claims, err := verifier.Verify(token)
+		if err != nil {
+			httpx.Error(c, errs.Unauthorized("unauthorized", "invalid or expired token"))
+			return
+		}
+
+		c.Set(userIDKey, claims.UserID)
+		c.Set(userRoleKey, claims.Role)
+		c.Next()
+	}
+}
+
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if RoleFrom(c) != roleAdmin {
+			httpx.Error(c, errs.Forbidden("forbidden", "admin role required"))
+			return
+		}
+		c.Next()
+	}
+}
+
+func UserIDFrom(c *gin.Context) (uint64, bool) {
+	if v, ok := c.Get(userIDKey); ok {
+		if id, ok := v.(uint64); ok {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
+func RoleFrom(c *gin.Context) string {
+	if v, ok := c.Get(userRoleKey); ok {
+		if role, ok := v.(string); ok {
+			return role
+		}
+	}
+	return ""
+}
+
+type rateEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+func RateLimit(rps float64, burst int, ttl time.Duration) gin.HandlerFunc {
+	var mu sync.Mutex
+	entries := make(map[string]*rateEntry)
+	lastEvict := time.Now()
+
+	return func(c *gin.Context) {
+		client := c.ClientIP()
+		now := time.Now()
+
+		mu.Lock()
+		if now.Sub(lastEvict) >= ttl {
+			for key, e := range entries {
+				if now.Sub(e.lastSeen) >= ttl {
+					delete(entries, key)
+				}
+			}
+			lastEvict = now
+		}
+
+		e, ok := entries[client]
+		if !ok {
+			e = &rateEntry{limiter: rate.NewLimiter(rate.Limit(rps), burst)}
+			entries[client] = e
+		}
+		e.lastSeen = now
+		allowed := e.limiter.Allow()
+		mu.Unlock()
+
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": gin.H{"code": "rate_limited", "message": "too many requests"},
+			})
+			return
+		}
+		c.Next()
 	}
 }

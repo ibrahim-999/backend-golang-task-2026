@@ -79,6 +79,12 @@ func (u *User) IsAdmin() bool {
 	return u.role == RoleAdmin
 }
 
+func (u *User) AssignID(id uint64) {
+	if u.id == 0 {
+		u.id = id
+	}
+}
+
 func (u *User) ID() uint64 {
 	return u.id
 }

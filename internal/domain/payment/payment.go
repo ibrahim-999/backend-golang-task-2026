@@ -75,6 +75,12 @@ func ReconstitutePayment(
 	}
 }
 
+func (p *Payment) AssignID(id uint64) {
+	if p.id == 0 {
+		p.id = id
+	}
+}
+
 func (p *Payment) ID() uint64             { return p.id }
 func (p *Payment) OrderID() uint64        { return p.orderID }
 func (p *Payment) IdempotencyKey() string { return p.idempotencyKey }

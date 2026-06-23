@@ -22,7 +22,11 @@ func newProductRepo(db *gorm.DB) *productRepo {
 
 func (r *productRepo) Create(ctx context.Context, p *product.Product) error {
 	m := productToModel(p)
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	p.AssignID(m.ID)
+	return nil
 }
 
 func (r *productRepo) Update(ctx context.Context, p *product.Product) error {

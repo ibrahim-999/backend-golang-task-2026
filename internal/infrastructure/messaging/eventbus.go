@@ -90,9 +90,11 @@ func (b *InProcessBus) dispatch(handler ports.EventHandler, event shared.Event) 
 func (b *InProcessBus) Publish(ctx context.Context, events ...shared.Event) error {
 	for _, event := range events {
 		b.mu.RLock()
-		handlers := b.handlers[event.EventName()]
-		dispatched := make([]ports.EventHandler, len(handlers))
-		copy(dispatched, handlers)
+		named := b.handlers[event.EventName()]
+		wildcard := b.handlers["*"]
+		dispatched := make([]ports.EventHandler, 0, len(named)+len(wildcard))
+		dispatched = append(dispatched, named...)
+		dispatched = append(dispatched, wildcard...)
 		b.mu.RUnlock()
 
 		for _, handler := range dispatched {

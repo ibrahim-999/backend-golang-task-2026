@@ -9,11 +9,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/command"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/eventhandler"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/query"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/auth"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/messaging"
+	notificationinfra "github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/notification"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/observability"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/payment"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/infrastructure/persistence/gormrepo"
+	"github.com/ibrahim-999/backend-golang-task-2026/internal/interfaces/http/handler"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/interfaces/http/router"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/platform/config"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/platform/server"
+	"github.com/ibrahim-999/backend-golang-task-2026/pkg/concurrency"
 )
 
 func main() {
@@ -50,12 +59,74 @@ func run() error {
 		}
 	}()
 
+	reads := gormrepo.NewRepositories(db)
+	uow := gormrepo.NewUnitOfWork(db)
+
+	gateway := payment.NewMockGateway(cfg.Payment.FailureRate, cfg.Payment.MinLatency, cfg.Payment.MaxLatency)
+
+	bus := messaging.NewInProcessBus(cfg.Worker.EventWorkers, cfg.Worker.EventQueueSize, log)
+	bus.Start()
+
+	dispatcher := notificationinfra.NewDispatcher(
+		reads.Notifications(),
+		notificationinfra.NewLogSender(log),
+		cfg.Worker.NotificationWorkers,
+		cfg.Worker.NotificationQueueSize,
+		log,
+	)
+	dispatcher.Start()
+
+	pool := concurrency.NewPool(cfg.Worker.OrderWorkers, cfg.Worker.OrderQueueSize)
+	pool.Start()
+
+	hasher := auth.NewBcryptHasher()
+	tokens := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.AccessTTL)
+
+	bus.Subscribe(eventhandler.NotificationOnOrderPaid(reads.Orders(), dispatcher))
+	bus.Subscribe(eventhandler.NotificationOnOrderFailed(reads.Orders(), dispatcher))
+	bus.Subscribe(eventhandler.AuditHandler(reads.Audit()))
+
+	registerUser := command.NewRegisterUser(uow, hasher)
+	loginUser := command.NewLoginUser(uow, reads, hasher, tokens)
+	updateUser := command.NewUpdateUser(uow)
+	getUser := query.NewGetUser(reads)
+
+	createProduct := command.NewCreateProduct(uow)
+	updateProduct := command.NewUpdateProduct(uow)
+	listProducts := query.NewListProducts(reads)
+	getProduct := query.NewGetProduct(reads)
+	getInventory := query.NewGetInventory(reads)
+
+	placeOrder := command.NewPlaceOrder(uow, reads, gateway, bus, pool)
+	cancelOrder := command.NewCancelOrder(uow, reads, bus)
+	getOrder := query.NewGetOrder(reads)
+	orderStatus := query.NewOrderStatus(reads)
+	listUserOrders := query.NewListUserOrders(reads)
+
+	listAllOrders := query.NewListAllOrders(reads)
+	updateOrderStatus := command.NewUpdateOrderStatus(uow)
+	dailyReport := query.NewDailyReport(reads)
+	lowStock := query.NewLowStock(reads)
+
+	authHandler := handler.NewAuth(registerUser, loginUser)
+	userHandler := handler.NewUser(registerUser, updateUser, getUser)
+	productHandler := handler.NewProduct(createProduct, updateProduct, listProducts, getProduct, getInventory)
+	orderHandler := handler.NewOrder(placeOrder, cancelOrder, getOrder, orderStatus, listUserOrders)
+	adminHandler := handler.NewAdmin(listAllOrders, updateOrderStatus, dailyReport, lowStock)
+
 	engine := router.New(router.Dependencies{
-		Version:     cfg.App.Version,
-		Environment: cfg.App.Environment,
-		Logger:      log,
-		Metrics:     metrics,
-		DB:          db,
+		Version:       cfg.App.Version,
+		Environment:   cfg.App.Environment,
+		Logger:        log,
+		Metrics:       metrics,
+		DB:            db,
+		TokenVerifier: tokens,
+		RateLimit:     cfg.RateLimit,
+		Auth:          authHandler,
+		User:          userHandler,
+		Product:       productHandler,
+		Order:         orderHandler,
+		Admin:         adminHandler,
 	})
 
 	srv := server.New(cfg.HTTP, engine, log)
@@ -69,7 +140,13 @@ func run() error {
 		Str("addr", cfg.HTTP.Addr()).
 		Msg("starting order-processing service")
 
-	return srv.Run(ctx)
+	runErr := srv.Run(ctx)
+
+	pool.Stop()
+	dispatcher.Stop()
+	bus.Stop()
+
+	return runErr
 }
 
 func healthcheck() int {

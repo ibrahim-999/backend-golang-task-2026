@@ -22,12 +22,22 @@ func newOrderRepo(db *gorm.DB) *orderRepo {
 
 func (r *orderRepo) Create(ctx context.Context, o *order.Order) error {
 	m := orderToModel(o)
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	o.AssignID(m.ID)
+	return nil
 }
 
 func (r *orderRepo) Update(ctx context.Context, o *order.Order) error {
-	m := orderToModel(o)
-	return r.db.WithContext(ctx).Save(&m).Error
+	return r.db.WithContext(ctx).
+		Model(&OrderModel{ID: o.ID()}).
+		Updates(map[string]any{
+			"status":         string(o.Status()),
+			"total_amount":   o.Total().Amount(),
+			"currency":       o.Total().Currency(),
+			"failure_reason": o.FailureReason(),
+		}).Error
 }
 
 func (r *orderRepo) FindByID(ctx context.Context, id uint64) (*order.Order, error) {
