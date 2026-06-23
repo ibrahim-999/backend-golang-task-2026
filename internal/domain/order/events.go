@@ -7,7 +7,7 @@ type OrderPlaced struct {
 	Currency    string
 }
 
-func (e OrderPlaced) EventName() string  { return "order.placed" }
+func (e OrderPlaced) EventName() string   { return "order.placed" }
 func (e OrderPlaced) AggregateID() uint64 { return e.OrderID }
 
 type OrderReserved struct {
@@ -15,7 +15,7 @@ type OrderReserved struct {
 }
 
 func (e OrderReserved) EventName() string   { return "order.reserved" }
-func (e OrderReserved) AggregateID() uint64  { return e.OrderID }
+func (e OrderReserved) AggregateID() uint64 { return e.OrderID }
 
 type OrderPaid struct {
 	OrderID uint64

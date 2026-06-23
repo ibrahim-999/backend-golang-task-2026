@@ -42,12 +42,12 @@ type InventoryModel struct {
 func (InventoryModel) TableName() string { return "inventories" }
 
 type OrderModel struct {
-	ID             uint64           `gorm:"primaryKey"`
-	UserID         uint64           `gorm:"not null;index:idx_orders_user_status,priority:1"`
-	Status         string           `gorm:"type:varchar(20);not null;index;index:idx_orders_user_status,priority:2"`
-	TotalAmount    int64            `gorm:"not null"`
-	Currency       string           `gorm:"type:varchar(3);not null;default:USD"`
-	IdempotencyKey string           `gorm:"uniqueIndex;not null"`
+	ID             uint64 `gorm:"primaryKey"`
+	UserID         uint64 `gorm:"not null;index:idx_orders_user_status,priority:1"`
+	Status         string `gorm:"type:varchar(20);not null;index;index:idx_orders_user_status,priority:2"`
+	TotalAmount    int64  `gorm:"not null"`
+	Currency       string `gorm:"type:varchar(3);not null;default:USD"`
+	IdempotencyKey string `gorm:"uniqueIndex;not null"`
 	FailureReason  string
 	Items          []OrderItemModel `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
 	CreatedAt      time.Time        `gorm:"index"`
@@ -103,14 +103,14 @@ type NotificationModel struct {
 func (NotificationModel) TableName() string { return "notifications" }
 
 type AuditLogModel struct {
-	ID        uint64  `gorm:"primaryKey"`
-	ActorID   *uint64 `gorm:"index"`
-	Action    string  `gorm:"not null;index"`
-	Entity    string  `gorm:"not null;index"`
-	EntityID  uint64  `gorm:"index"`
-	Before    string  `gorm:"type:text"`
-	After     string  `gorm:"type:text"`
-	Metadata  string  `gorm:"type:text"`
+	ID        uint64    `gorm:"primaryKey"`
+	ActorID   *uint64   `gorm:"index"`
+	Action    string    `gorm:"not null;index"`
+	Entity    string    `gorm:"not null;index"`
+	EntityID  uint64    `gorm:"index"`
+	Before    string    `gorm:"type:text"`
+	After     string    `gorm:"type:text"`
+	Metadata  string    `gorm:"type:text"`
 	CreatedAt time.Time `gorm:"index"`
 }
 

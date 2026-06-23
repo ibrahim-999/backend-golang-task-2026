@@ -44,7 +44,7 @@ func New(kind Kind, code, message string) *Error {
 	return &Error{Kind: kind, Code: code, Message: message}
 }
 
-func Validation(code, message string) *Error   { return New(KindValidation, code, message) }
+func Validation(code, message string) *Error    { return New(KindValidation, code, message) }
 func NotFound(code, message string) *Error      { return New(KindNotFound, code, message) }
 func Conflict(code, message string) *Error      { return New(KindConflict, code, message) }
 func Unauthorized(code, message string) *Error  { return New(KindUnauthorized, code, message) }

@@ -13,16 +13,16 @@ func actor(id uint64) *uint64 { return &id }
 
 func TestNewEntry(t *testing.T) {
 	tests := []struct {
-		name      string
-		actorID   *uint64
-		action    string
-		entity    string
-		entityID  uint64
-		before    string
-		after     string
-		metadata  string
-		wantErr   bool
-		errCode   string
+		name     string
+		actorID  *uint64
+		action   string
+		entity   string
+		entityID uint64
+		before   string
+		after    string
+		metadata string
+		wantErr  bool
+		errCode  string
 	}{
 		{
 			name:     "valid entry with actor",
