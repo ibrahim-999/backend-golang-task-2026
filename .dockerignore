@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dockerignore
+.env
+*.local.env
+bin/
+dist/
+out/
+data/
+pgdata/
+coverage.*
+*.out
+.idea/
+.vscode/
+deploy/
+*.md
+docs/adr/
