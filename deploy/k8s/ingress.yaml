@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: order-processing
+  namespace: order-processing
+  labels:
+    app.kubernetes.io/name: order-processing
+    app.kubernetes.io/component: app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: order-processing.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: order-processing-app
+                port:
+                  number: 8080

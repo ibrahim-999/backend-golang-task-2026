@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: order-processing
+namespace: order-processing
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: order-processing
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - postgres.yaml
+  - app-deployment.yaml
+  - app-service.yaml
+  - ingress.yaml
+  - hpa.yaml
