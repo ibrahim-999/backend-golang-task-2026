@@ -105,7 +105,7 @@ func New(cfg *config.Config, log zerolog.Logger, metrics *observability.Metrics)
 	getProduct := query.NewGetProduct(reads)
 	getInventory := query.NewGetInventory(reads)
 
-	placeOrder := command.NewPlaceOrder(uow, reads, gateway, bus, pool)
+	placeOrder := command.NewPlaceOrder(uow, reads, gateway, bus, pool, cfg.Payment.MaxAttempts, cfg.Payment.RetryBackoff)
 	cancelOrder := command.NewCancelOrder(uow, reads, bus)
 	getOrder := query.NewGetOrder(reads)
 	orderStatus := query.NewOrderStatus(reads)

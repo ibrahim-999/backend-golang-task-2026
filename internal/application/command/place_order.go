@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"time"
 
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/application/ports"
 	"github.com/ibrahim-999/backend-golang-task-2026/internal/domain/order"
@@ -22,20 +23,24 @@ type PlaceOrderInput struct {
 }
 
 type PlaceOrder struct {
-	uow     ports.UnitOfWork
-	reads   ports.RepositoryProvider
-	gateway ports.PaymentGateway
-	bus     ports.EventBus
-	pool    *concurrency.Pool
+	uow          ports.UnitOfWork
+	reads        ports.RepositoryProvider
+	gateway      ports.PaymentGateway
+	bus          ports.EventBus
+	pool         *concurrency.Pool
+	maxAttempts  int
+	retryBackoff time.Duration
 }
 
-func NewPlaceOrder(uow ports.UnitOfWork, reads ports.RepositoryProvider, gateway ports.PaymentGateway, bus ports.EventBus, pool *concurrency.Pool) *PlaceOrder {
+func NewPlaceOrder(uow ports.UnitOfWork, reads ports.RepositoryProvider, gateway ports.PaymentGateway, bus ports.EventBus, pool *concurrency.Pool, maxAttempts int, retryBackoff time.Duration) *PlaceOrder {
 	return &PlaceOrder{
-		uow:     uow,
-		reads:   reads,
-		gateway: gateway,
-		bus:     bus,
-		pool:    pool,
+		uow:          uow,
+		reads:        reads,
+		gateway:      gateway,
+		bus:          bus,
+		pool:         pool,
+		maxAttempts:  maxAttempts,
+		retryBackoff: retryBackoff,
 	}
 }
 
@@ -117,11 +122,25 @@ func (h *PlaceOrder) process(ctx context.Context, ord *order.Order) (*payment.Pa
 		return nil, err
 	}
 
-	res, chargeErr := h.gateway.Charge(ctx, ports.ChargeRequest{
-		IdempotencyKey: ord.IdempotencyKey(),
-		Amount:         ord.Total(),
-	})
-	_ = pay.RecordAttempt("mock")
+	attempts := h.maxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var res ports.ChargeResult
+	var chargeErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		_ = pay.RecordAttempt("mock")
+		res, chargeErr = h.gateway.Charge(ctx, ports.ChargeRequest{
+			IdempotencyKey: ord.IdempotencyKey(),
+			Amount:         ord.Total(),
+		})
+		if chargeErr == nil || attempt == attempts {
+			break
+		}
+		if h.retryBackoff > 0 {
+			time.Sleep(h.retryBackoff * time.Duration(attempt))
+		}
+	}
 
 	settleErr := h.uow.Do(ctx, func(rp ports.RepositoryProvider) error {
 		if chargeErr != nil {
