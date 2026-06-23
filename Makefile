@@ -133,9 +133,11 @@ test-integration: env
 .PHONY: cover
 cover: env
 	$(COMPOSE) up -d postgres
+	$(COMPOSE) --profile messaging up -d rabbitmq
+	@for i in $$(seq 1 30); do [ "$$(docker inspect -f '{{.State.Health.Status}}' order-processing-rabbitmq-1 2>/dev/null)" = healthy ] && break; sleep 2; done
 	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
-	$(GO_RUN_TESTDB) sh -c "go test -tags=integration -p 1 -coverpkg=./... -coverprofile=coverage.out -count=1 ./... && go tool cover -func=coverage.out | tail -n 1"
+	$(GO_RUN_TESTDB) sh -c "go test -tags=integration -p 1 -coverpkg=./internal/...,./pkg/... -coverprofile=coverage.out -count=1 ./... && go tool cover -func=coverage.out | tail -n 1"
 
 .PHONY: bench
 bench: env

@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
@@ -239,6 +241,43 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 
 	lowStock := client.do(t, http.MethodGet, "/api/v1/admin/inventory/low-stock", adminToken, nil)
 	require.Equal(t, http.StatusOK, lowStock.status, lowStock.bodyString())
+
+	notFoundProduct := client.do(t, http.MethodGet, "/api/v1/products/999999", "", nil)
+	require.Equal(t, http.StatusNotFound, notFoundProduct.status, notFoundProduct.bodyString())
+
+	notFoundOrder := client.do(t, http.MethodGet, "/api/v1/orders/999999", customerToken, nil)
+	require.Equal(t, http.StatusNotFound, notFoundOrder.status, notFoundOrder.bodyString())
+
+	emptyItems := client.do(t, http.MethodPost, "/api/v1/orders", customerToken, map[string]any{
+		"items": []map[string]any{},
+	})
+	require.Equal(t, http.StatusBadRequest, emptyItems.status, emptyItems.bodyString())
+
+	badEmail := client.do(t, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"email": "notanemail", "password": pw, "full_name": "Bad Email",
+	})
+	require.Equal(t, http.StatusBadRequest, badEmail.status, badEmail.bodyString())
+
+	for _, path := range []string{"/health", "/ready", "/metrics", "/docs"} {
+		resp := client.do(t, http.MethodGet, path, "", nil)
+		require.Equal(t, http.StatusOK, resp.status, path+": "+resp.bodyString())
+	}
+	_ = client.do(t, http.MethodGet, "/openapi.yaml", "", nil)
+
+	statusUpdate := client.do(t, http.MethodPut, fmt.Sprintf("/api/v1/admin/orders/%d/status", placed.ID), adminToken, map[string]any{
+		"status": "cancelled",
+	})
+	require.Contains(t, []int{http.StatusOK, http.StatusConflict}, statusUpdate.status, statusUpdate.bodyString())
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, wsErr := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, wsErr)
+	client.do(t, http.MethodPost, "/api/v1/orders", customerToken, map[string]any{
+		"items": []map[string]any{{"product_id": product.ID, "quantity": 1}},
+	})
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, _ = conn.ReadMessage()
+	_ = conn.Close()
 }
 
 type apiClient struct {
