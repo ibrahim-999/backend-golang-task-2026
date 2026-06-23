@@ -109,6 +109,11 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 		"role":      "customer",
 	})
 	require.Equal(t, http.StatusCreated, customerReg.status)
+	var customerUser struct {
+		ID uint64 `json:"id"`
+	}
+	customerReg.decode(t, &customerUser)
+	require.NotZero(t, customerUser.ID)
 
 	customerToken := client.login(t, customerEmail, "supersecret1")
 
@@ -196,6 +201,43 @@ func TestOrderLifecycleIntegration(t *testing.T) {
 	secondIdemResp.decode(t, &secondIdem)
 
 	require.Equal(t, firstIdem.ID, secondIdem.ID)
+
+	listProducts := client.do(t, http.MethodGet, "/api/v1/products?page=1&size=20", "", nil)
+	require.Equal(t, http.StatusOK, listProducts.status, listProducts.bodyString())
+
+	getProduct := client.do(t, http.MethodGet, fmt.Sprintf("/api/v1/products/%d", product.ID), "", nil)
+	require.Equal(t, http.StatusOK, getProduct.status, getProduct.bodyString())
+
+	updateProduct := client.do(t, http.MethodPut, fmt.Sprintf("/api/v1/products/%d", product.ID), adminToken, map[string]any{
+		"name":         "Updated Widget",
+		"price_amount": 1800,
+		"currency":     "USD",
+		"active":       true,
+	})
+	require.Equal(t, http.StatusOK, updateProduct.status, updateProduct.bodyString())
+
+	listOrders := client.do(t, http.MethodGet, "/api/v1/orders?page=1&size=20", customerToken, nil)
+	require.Equal(t, http.StatusOK, listOrders.status, listOrders.bodyString())
+
+	statusResp := client.do(t, http.MethodGet, fmt.Sprintf("/api/v1/orders/%d/status", placed.ID), customerToken, nil)
+	require.Equal(t, http.StatusOK, statusResp.status, statusResp.bodyString())
+
+	getUser := client.do(t, http.MethodGet, fmt.Sprintf("/api/v1/users/%d", customerUser.ID), customerToken, nil)
+	require.Equal(t, http.StatusOK, getUser.status, getUser.bodyString())
+
+	updateUser := client.do(t, http.MethodPut, fmt.Sprintf("/api/v1/users/%d", customerUser.ID), customerToken, map[string]any{
+		"full_name": "Renamed Customer",
+	})
+	require.Equal(t, http.StatusOK, updateUser.status, updateUser.bodyString())
+
+	adminOrders := client.do(t, http.MethodGet, "/api/v1/admin/orders?page=1&size=20", adminToken, nil)
+	require.Equal(t, http.StatusOK, adminOrders.status, adminOrders.bodyString())
+
+	dailyReport := client.do(t, http.MethodGet, "/api/v1/admin/reports/daily", adminToken, nil)
+	require.Equal(t, http.StatusOK, dailyReport.status, dailyReport.bodyString())
+
+	lowStock := client.do(t, http.MethodGet, "/api/v1/admin/inventory/low-stock", adminToken, nil)
+	require.Equal(t, http.StatusOK, lowStock.status, lowStock.bodyString())
 }
 
 type apiClient struct {

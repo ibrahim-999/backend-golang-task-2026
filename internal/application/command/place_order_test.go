@@ -339,14 +339,19 @@ func (r *fakeAuditRepo) Append(ctx context.Context, e *audit.Entry) error {
 }
 
 type fakePaymentGateway struct {
-	mu      sync.Mutex
-	decline bool
-	calls   int
-	results map[string]ports.ChargeResult
+	mu            sync.Mutex
+	declineAlways bool
+	failFirst     int
+	calls         int
+	results       map[string]ports.ChargeResult
 }
 
 func newFakePaymentGateway(decline bool) *fakePaymentGateway {
-	return &fakePaymentGateway{decline: decline, results: map[string]ports.ChargeResult{}}
+	return &fakePaymentGateway{declineAlways: decline, results: map[string]ports.ChargeResult{}}
+}
+
+func newFlakyGateway(failFirst int) *fakePaymentGateway {
+	return &fakePaymentGateway{failFirst: failFirst, results: map[string]ports.ChargeResult{}}
 }
 
 func (g *fakePaymentGateway) Charge(ctx context.Context, req ports.ChargeRequest) (ports.ChargeResult, error) {
@@ -356,7 +361,7 @@ func (g *fakePaymentGateway) Charge(ctx context.Context, req ports.ChargeRequest
 		return existing, nil
 	}
 	g.calls++
-	if g.decline {
+	if g.declineAlways || g.calls <= g.failFirst {
 		return ports.ChargeResult{}, errs.PaymentFailed("payment.declined", "payment was declined by the gateway")
 	}
 	res := ports.ChargeResult{Provider: "mock", ProviderRef: "ref-" + req.IdempotencyKey}
@@ -435,7 +440,7 @@ func TestPlaceOrderHappyPath(t *testing.T) {
 	bus := &fakeEventBus{}
 	provider := &fakeProvider{store: store}
 
-	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool)
+	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool, 3, 0)
 
 	ord, err := h.Handle(context.Background(), PlaceOrderInput{
 		UserID:         42,
@@ -470,7 +475,7 @@ func TestPlaceOrderOutOfStock(t *testing.T) {
 	bus := &fakeEventBus{}
 	provider := &fakeProvider{store: store}
 
-	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool)
+	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool, 3, 0)
 
 	ord, err := h.Handle(context.Background(), PlaceOrderInput{
 		UserID:         42,
@@ -502,7 +507,7 @@ func TestPlaceOrderPaymentDeclined(t *testing.T) {
 	bus := &fakeEventBus{}
 	provider := &fakeProvider{store: store}
 
-	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool)
+	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool, 3, 0)
 
 	ord, err := h.Handle(context.Background(), PlaceOrderInput{
 		UserID:         42,
@@ -527,6 +532,7 @@ func TestPlaceOrderPaymentDeclined(t *testing.T) {
 	pay, err := provider.Payments().FindByOrderID(context.Background(), stored.ID())
 	require.NoError(t, err)
 	assert.Equal(t, payment.StatusFailed, pay.Status())
+	assert.Equal(t, 3, gateway.chargeCount())
 
 	names := bus.names()
 	assert.Contains(t, names, "payment.failed")
@@ -545,7 +551,7 @@ func TestPlaceOrderIdempotency(t *testing.T) {
 	bus := &fakeEventBus{}
 	provider := &fakeProvider{store: store}
 
-	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool)
+	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool, 3, 0)
 
 	in := PlaceOrderInput{
 		UserID:         42,
@@ -565,4 +571,30 @@ func TestPlaceOrderIdempotency(t *testing.T) {
 	assert.Equal(t, 1, gateway.chargeCount())
 	assert.Len(t, store.orders, 1)
 	assert.Equal(t, 7, store.available[1])
+}
+
+func TestPlaceOrderRetriesThenSucceeds(t *testing.T) {
+	store := newFakeStore()
+	seedProduct(t, store, 1, 1000, 10)
+
+	pool := newStartedPool()
+	defer pool.Stop()
+
+	gateway := newFlakyGateway(2)
+	bus := &fakeEventBus{}
+	provider := &fakeProvider{store: store}
+
+	h := NewPlaceOrder(&fakeUoW{store: store}, provider, gateway, bus, pool, 3, 0)
+
+	ord, err := h.Handle(context.Background(), PlaceOrderInput{
+		UserID:         42,
+		IdempotencyKey: "key-retry",
+		Items:          []PlaceOrderItem{{ProductID: 1, Quantity: 2}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, ord)
+	assert.Equal(t, order.StatusFulfilled, ord.Status())
+	assert.Equal(t, 3, gateway.chargeCount())
+	assert.Equal(t, 8, store.available[1])
 }

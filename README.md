@@ -1,281 +1,130 @@
-# Senior Backend Engineer - Golang Task
+# Concurrent Order Processing System
 
-## Overview
+A backend service for high-volume e-commerce order processing, written in Go. It covers the full
+order lifecycle (placement, inventory reservation, payment, fulfilment, notification and reporting)
+and treats correctness under concurrency as the primary goal rather than an afterthought.
 
-Build a **Concurrent Order Processing System** for an e-commerce platform that can handle high-volume order processing with real-time inventory management, payment processing, and notifications.
+Built for the Easy Orders senior backend assessment.
 
-## Technical Requirements
+## What it does
 
-### Core Technologies
+- JWT-authenticated REST API with role-based access (customer / admin)
+- Order processing through a bounded worker pool, so a burst of traffic degrades gracefully instead
+  of exhausting the database
+- Race-free inventory. Overselling is prevented at the database level, and there is a test that fires
+  500 goroutines at the last remaining unit and asserts exactly one of them wins
+- Idempotent payments with bounded retry and backoff against a simulated gateway (configurable
+  latency and failure rate)
+- Event-driven notifications and audit logging that run asynchronously and never block an order
+- Concurrent daily sales reporting
+- Prometheus metrics, structured logging, connection pooling, graceful shutdown
+- Live order-status updates over WebSocket and optional RabbitMQ event publishing
+- OpenAPI spec served as Swagger UI, a Postman collection, and Kubernetes manifests
 
-- **Language**: Go 1.21+
-- **Database**: PostgreSQL 15+
-- **ORM**: GORM v2
-- **Framework**: Gin (recommended) or Echo
-- **Concurrency**: Goroutines, Channels, Sync packages
-- **Testing**: Built-in testing + testify
+## Tech stack
 
-### Mandatory Features
+Go 1.25, Gin, GORM v2, PostgreSQL 15. zerolog for logging, the Prometheus client for metrics,
+golang-jwt for tokens, gorilla/websocket, and amqp091-go for RabbitMQ. Everything builds and runs in
+Docker, so the only thing the host needs is Docker and Make.
 
-#### 1. **API Design & Implementation**
+## Running it
 
-- RESTful API with proper HTTP status codes
-- Input validation and error handling
-- Middleware for logging, authentication, and rate limiting
-- API documentation (OpenAPI/Swagger)
-
-#### 2. **Database Design & Management**
-
-- PostgreSQL with proper indexing strategy
-- Database migrations using GORM
-- Connection pooling and transaction management
-- Referential integrity and constraints
-
-#### 3. **Concurrency Requirements**
-
-- **Order Processing Pipeline**: Process multiple orders simultaneously
-- **Inventory Management**: Handle concurrent inventory updates without race conditions
-- **Notification System**: Send notifications asynchronously
-- **Report Generation**: Generate reports concurrently with order processing
-- **Background Jobs**: Implement job queue for heavy operations
-
-#### 4. **Business Logic**
-
-Implement a complete order processing workflow:
-
-```
-Order Placement → Inventory Check → Payment Processing → Order Fulfillment → Notification → Reporting
+```bash
+make up      # build the image, start Postgres and the app (migrations run on boot)
+make seed    # load demo data: 4 users and 10 products
+make smoke   # curl the health/readiness/metrics endpoints
 ```
 
-## System Architecture
+The API listens on http://localhost:8080 and the Swagger UI is at http://localhost:8080/docs.
 
-### Database Schema
+Logins created by the seeder:
 
-Design and implement the following entities:
+| Email | Password | Role |
+|-------|----------|------|
+| admin@ex.com | adminpass123 | admin |
+| cathy@ex.com | custpass123 | customer |
 
-1. **Users** (customers and admins)
-2. **Products** (with inventory tracking)
-3. **Orders** (with status tracking)
-4. **OrderItems** (order line items)
-5. **Payments** (payment transactions)
-6. **Inventory** (stock management)
-7. **Notifications** (system notifications)
-8. **AuditLogs** (for tracking changes)
+(`dave@ex.com` and `erin@ex.com` exist too, same customer password.)
 
-### API Endpoints
+For a full walkthrough, the Postman collection, and how to run the automated suites, see
+[docs/TESTING.md](docs/TESTING.md).
 
-#### User Management
+## Architecture
 
-- `POST /api/v1/users` - Create user
-- `GET /api/v1/users/{id}` - Get user profile
-- `PUT /api/v1/users/{id}` - Update user profile
+The code is organised as a hexagonal (ports and adapters) application with a domain-driven core and
+an event-driven processing model. The domain layer is plain Go and has no idea that Gin, GORM or
+PostgreSQL exist. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) goes through the layers, the
+concurrency model and the decisions behind them.
 
-#### Product Management
-
-- `GET /api/v1/products` - List products (with pagination)
-- `GET /api/v1/products/{id}` - Get product details
-- `POST /api/v1/products` - Create product (admin)
-- `PUT /api/v1/products/{id}` - Update product (admin)
-- `GET /api/v1/products/{id}/inventory` - Check inventory
-
-#### Order Management
-
-- `POST /api/v1/orders` - Create order
-- `GET /api/v1/orders` - List user orders
-- `GET /api/v1/orders/{id}` - Get order details
-- `PUT /api/v1/orders/{id}/cancel` - Cancel order
-- `GET /api/v1/orders/{id}/status` - Get order status
-
-#### Admin Endpoints
-
-- `GET /api/v1/admin/orders` - List all orders
-- `PUT /api/v1/admin/orders/{id}/status` - Update order status
-- `GET /api/v1/admin/reports/daily` - Daily sales report
-- `GET /api/v1/admin/inventory/low-stock` - Low stock alerts
-
-## Concurrency Challenges
-
-### 1. **Race Condition Prevention**
-
-- Implement proper locking mechanisms for inventory updates
-- Use database transactions for critical operations
-- Handle concurrent order processing without overselling
-
-### 2. **Performance Optimization**
-
-- Process multiple orders simultaneously
-- Implement worker pools for background tasks
-- Use channels for communication between goroutines
-
-### 3. **Real-time Features**
-
-- Real-time inventory updates
-- Live order status tracking
-- Instant notifications
-
-## Implementation Guidelines
-
-### Project Structure
+The short version:
 
 ```
-/
-├── cmd/
-│   └── server/
-│       └── main.go
-├── internal/
-│   ├── api/
-│   │   ├── handlers/
-│   │   ├── middleware/
-│   │   └── routes/
-│   ├── models/
-│   ├── services/
-│   ├── repository/
-│   ├── config/
-│   └── workers/
-├── pkg/
-│   ├── database/
-│   ├── logger/
-│   └── utils/
-├── migrations/
-├── tests/
-├── docker/
-├── docs/
-├── go.mod
-├── go.sum
-└── .env.example
+interfaces/http  ->  application (use cases + ports)  ->  domain
+                              ^
+                     infrastructure (gorm, payment, messaging, observability)
+
+Every source dependency points inward. The domain is pure Go.
 ```
 
-### Best Practices to Implement
-
-1. **Clean Architecture**
-
-   - Separation of concerns
-   - Dependency injection
-   - Interface-driven design
-
-2. **Error Handling**
-
-   - Custom error types
-   - Proper error propagation
-   - Logging and monitoring
-
-3. **Testing**
-
-   - Unit tests with >80% coverage
-   - Integration tests for APIs
-   - Concurrent testing scenarios
-
-4. **Security**
-
-   - JWT authentication
-   - Input validation and sanitization
-   - SQL injection prevention
-   - Rate limiting
-
-5. **Performance**
-   - Database query optimization
-   - Connection pooling
-   - Caching strategies (optional: Redis)
-
-## Specific Concurrency Scenarios to Handle
-
-### Scenario 1: High-Volume Order Processing
+## Project layout
 
 ```
-Challenge: Process 1000 orders simultaneously while maintaining data consistency
-Solution: Implement worker pool pattern with proper synchronization
+cmd/server              process entrypoint
+cmd/seed                demo data loader
+internal/domain         aggregates, value objects and domain events (no framework imports)
+internal/application    use cases (command/query), event handlers, and the ports they depend on
+internal/infrastructure adapters: gorm repositories, mock payment gateway, event bus, dispatcher, auth
+internal/interfaces     HTTP delivery: handlers, middleware, DTOs, router, websocket
+internal/bootstrap      composition root that wires everything together
+internal/platform       configuration and HTTP server lifecycle
+pkg                     small reusable pieces (worker pool, typed errors)
+deploy/k8s              Kubernetes manifests
+docs                    architecture notes, testing guide, OpenAPI spec
+postman                 Postman collection and environment
+test                    integration and concurrency tests
 ```
 
-### Scenario 2: Inventory Race Conditions
+## Make targets
+
+`make help` prints the full list. The ones used most:
 
 ```
-Challenge: Multiple customers trying to buy the last item simultaneously
-Solution: Use database transactions with proper isolation levels
+make up / make down        start / stop the stack
+make seed                  load demo data (idempotent)
+make test                  unit tests
+make test-integration      integration + concurrency tests under the race detector
+make bench                 order-processing benchmark
+make logs / ps / smoke
 ```
 
-### Scenario 3: Payment Processing
+Integration tests and the benchmark run against a throwaway `orders_test` database that is dropped
+and recreated each run, so they never touch the data you are working with.
 
-```
-Challenge: Handle payment failures and retries without double-charging
-Solution: Implement idempotent operations with proper state management
-```
+## Database and migrations
 
-### Scenario 4: Notification System
+The schema is managed with GORM's AutoMigrate, which runs on startup and again from the seeder, so
+the eight tables are always present. I kept the column definitions and indexes on the GORM models
+(`internal/infrastructure/persistence/gormrepo/models.go`) instead of maintaining a separate set of
+hand-written SQL migration files.
 
-```
-Challenge: Send notifications without blocking order processing
-Solution: Asynchronous notification system using goroutines and channels
-```
+## Notes on testing and scope
 
-## Evaluation Criteria
+Statement coverage is about 66% when the integration suite is included (`make cover`). The domain
+and the order pipeline are close to fully covered by unit tests; the GORM repositories and HTTP
+handlers are covered by the integration suite, which drives the real server against Postgres. The
+integration and concurrency suites run against a throwaway database that is dropped and recreated
+each run, so they never touch the data you are working with.
 
-### Technical Implementation (40%)
+Payments are idempotent and retried with bounded backoff (`PAYMENT_MAX_ATTEMPTS`,
+`PAYMENT_RETRY_BACKOFF`). A transient decline is retried, and because the gateway de-duplicates on
+the idempotency key a retry never double-charges. The order only fails, releasing its stock, once
+the attempts are exhausted.
 
-- Code quality and organization
-- Proper use of Go idioms and patterns
-- GORM usage and database design
-- Concurrency implementation
+RabbitMQ is optional (`RABBITMQ_ENABLED`). When enabled, the in-process event bus is wrapped so every
+domain event is also published to a topic exchange, with a consumer reading them back; broker errors
+are logged and swallowed so a queue problem never breaks order processing.
 
-### API Design (20%)
-
-- RESTful design principles
-- Proper HTTP status codes
-- Input validation and error handling
-- Documentation quality
-
-### Concurrency & Performance (25%)
-
-- Effective use of goroutines and channels
-- Race condition handling
-- Performance under load
-- Resource management
-
-### Best Practices (15%)
-
-- Error handling
-- Testing coverage
-- Security considerations
-- Code documentation
-
-## Deliverables
-
-1. **Complete Go application** with all required features
-2. **Database migrations** and seed data
-3. **API documentation** (Swagger/OpenAPI)
-4. **Test suite** with good coverage
-5. **Docker setup** for easy deployment
-6. **Performance benchmarks** for concurrent operations
-7. **README with setup instructions**
-
-## Time Limit
-
-**5-7 days** (adjust based on candidate's availability)
-
-## Bonus Points
-
-- WebSocket integration for real-time updates
-- Metrics and monitoring (Prometheus)
-- Distributed tracing
-- Message queue integration (RabbitMQ/Kafka)
-- Kubernetes deployment manifests
-- Load testing scenarios
-
-## Getting Started
-
-1. Fork this repository
-2. Set up PostgreSQL database
-3. Copy `.env.example` to `.env` and configure
-4. Run `go mod init` and install dependencies
-5. Implement the solution step by step
-6. Document your design decisions
-
-## Questions to Consider
-
-- How would you handle database failover?
-- What's your strategy for horizontal scaling?
-- How would you implement distributed locks?
-- What monitoring would you add in production?
-
----
-
-**Good luck! We're excited to see your implementation.** 🚀
+One detail I would still tidy up: the first event an aggregate records (before the database has
+assigned its ID) carries an aggregate id of 0. The persisted rows and every later lifecycle event
+have the real IDs; only those initial event payloads are affected. Generating IDs in the application
+rather than relying on the database would remove this.

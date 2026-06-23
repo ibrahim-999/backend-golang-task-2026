@@ -128,18 +128,21 @@ test-integration: env
 	$(COMPOSE) up -d postgres
 	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
-	$(GO_RUN_TESTDB) go test -race -count=1 -tags=integration ./test/...
+	$(GO_RUN_TESTDB) go test -race -p 1 -count=1 -tags=integration ./test/...
 
 .PHONY: cover
-cover:
-	$(GO_RUN) sh -c "go test -count=1 -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -n 1"
+cover: env
+	$(COMPOSE) up -d postgres
+	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
+	$(GO_RUN_TESTDB) sh -c "go test -tags=integration -p 1 -coverpkg=./... -coverprofile=coverage.out -count=1 ./... && go tool cover -func=coverage.out | tail -n 1"
 
 .PHONY: bench
 bench: env
 	$(COMPOSE) up -d postgres
 	$(COMPOSE) exec -T postgres psql -U postgres -c "DROP DATABASE IF EXISTS orders_test WITH (FORCE)" >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T postgres psql -U postgres -c "CREATE DATABASE orders_test" >/dev/null 2>&1 || true
-	$(GO_RUN_TESTDB) go test -tags=integration -bench=. -benchmem -run=^$$ ./test/...
+	$(GO_RUN_TESTDB) go test -tags=integration -p 1 -bench=. -benchmem -run=^$$ ./test/...
 
 .PHONY: migrate
 migrate:
