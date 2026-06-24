@@ -1,0 +1,28 @@
+sequenceDiagram
+    actor Customer
+    participant API as HTTP handler
+    participant UC as PlaceOrder
+    participant Pool as Worker pool
+    participant DB as PostgreSQL
+    participant Pay as Payment gateway
+    participant Bus as Event bus
+    participant Async as Notifications and Audit
+
+    Customer->>API: POST /api/v1/orders (JWT, items)
+    API->>UC: Handle
+    UC->>DB: FindByIdempotencyKey
+    alt order already exists
+        DB-->>UC: existing order
+        UC-->>API: 200 OK
+    else new order
+        UC->>DB: load products, snapshot prices
+        UC->>Pool: submit, then wait
+        Pool->>DB: Tx1 create order, reserve stock
+        Note over DB: UPDATE ... WHERE available >= qty<br/>0 rows means out of stock, rollback
+        Pool->>Pay: charge, idempotent with retry and backoff
+        Pool->>DB: Tx2 commit stock and fulfil<br/>or release stock and fail
+        UC->>Bus: publish domain events
+        Bus--)Async: dispatch, non-blocking
+        UC-->>API: 201 Created
+    end
+    API-->>Customer: order JSON

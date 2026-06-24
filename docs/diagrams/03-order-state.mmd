@@ -1,0 +1,13 @@
+stateDiagram-v2
+    [*] --> pending: order placed
+    pending --> reserved: stock reserved
+    reserved --> paid: payment succeeded
+    paid --> fulfilled: stock committed
+    pending --> failed
+    reserved --> failed: payment declined, stock released
+    pending --> cancelled
+    reserved --> cancelled: stock released
+    paid --> cancelled: refunded, stock released
+    fulfilled --> [*]
+    cancelled --> [*]
+    failed --> [*]

@@ -1,0 +1,6 @@
+flowchart LR
+    P[Order placement] --> I[Inventory reservation]
+    I --> Pay[Payment]
+    Pay --> F[Fulfilment]
+    F --> N[Notification]
+    F --> R[Reporting]

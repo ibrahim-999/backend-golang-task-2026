@@ -66,6 +66,23 @@ interfaces/http  ->  application (use cases + ports)  ->  domain
 Every source dependency points inward. The domain is pure Go.
 ```
 
+## Order processing flow
+
+The business workflow the system implements:
+
+![Order processing pipeline: placement, inventory reservation, payment, fulfilment, then notification and reporting](docs/diagrams/01-pipeline.gif)
+
+Placing an order runs as two database transactions with the payment call in between, so a slow or
+failing payment provider never holds database locks. Inventory is reserved with a single conditional
+update, which is what makes overselling impossible. Everything after fulfilment is asynchronous.
+
+![Order placement request flow: the handler calls the PlaceOrder use case, which checks idempotency, snapshots prices, and runs processing through a worker pool as two database transactions with the payment call in between, then publishes events asynchronously](docs/diagrams/02-place-order.gif)
+
+The order is a strict state machine. Cancelling releases reserved stock, and refunds the payment if
+the order was already paid:
+
+![Order state machine: pending to reserved to paid to fulfilled, with cancelled (release stock, refund if paid) and failed (release stock) as the off-ramps](docs/diagrams/03-order-state.gif)
+
 ## Project layout
 
 ```
